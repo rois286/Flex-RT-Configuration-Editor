@@ -1,0 +1,74 @@
+---
+title: "Flex RT"
+output: html_notebook
+---
+
+Reads the main configuration file: Binary strings, images and settings.
+```{r}
+fwx <- file("G:/Documents and Settings/WinXP/My Documents/simatic/PDATA.FWX", "rb")
+```
+
+Functions:
+```{r}
+# Read 16 bits unsigned little endian word
+d2 <- function(file_handle) {
+  readBin(file_handle, "int", 1, 2, F, "little")
+}
+
+# Read 32 bits little endian double word
+d4 <- function(file_handle) {
+  readBin(file_handle, "int", 1, 4, T, "little")
+}
+```
+
+
+Not sure if it should be 16bit or not, because it always looks the same, the data type are always Little Endian (LSB first)
+The first 6 words of 16bit are always the same
+```{r}
+header.start1 = d2(fwx)
+header.start2 = d2(fwx)
+header.start3 = d2(fwx)
+header.start4 = d2(fwx)
+header.start5 = d2(fwx)
+header.start6 = d2(fwx)
+```
+
+These two double words seems to say how big is the padding at the last section of the file
+It looks like it should be in a 4 bytes alignment (e.g. 0xe2 is actually 0xe4 bytes)
+```{r}
+header.post_tables_padding1 = d4(fwx)
+header.post_tables_padding2 = d4(fwx)
+```
+
+This is the end of the tables, this way we can tell what is the length of the last object.
+```{r}
+header.tables_end = d4(fwx)
+```
+
+Most important part, the Table Of Contents (TOC), or the array of arrays. This part tells in which offset every part of the file is. It does not say the length of each part, but you can calculate it by subtracting the next offset from the current.
+```{r}
+# how many entries in the table of contents
+header.toc_entries = d4(fwx)
+# location of table of content, should be the last part in the file
+header.toc_offset = d4(fwx)
+```
+
+I believe this tells the run time which elements to initialize
+```{r}
+header.init_entries = d4(fwx)
+header.init_offset = d4(fwx)
+```
+
+Just made up some names for these parts. These are 16 bits (double bytes) entries.
+```{r}
+header.info_entries = d4(fwx)
+header.info_offset = d4(fwx)
+header.metainfo_entries = d4(fwx)
+header.metainfo_offset = d4(fwx)
+```
+
+How many languages exist in the file and what is their code pages (0x409 - English, 0x407 - German, 0x40D - Hebrew)
+```{r}
+header.lang_entries = d4(fwx)
+header.lang_offset = d4(fwx)
+```
