@@ -139,7 +139,127 @@ for(i in 1:length(toc)) {
     toc.entries[next_pos, 'id'] <- id
     toc.entries[next_pos, 'name'] <- name
     toc.entries[next_pos, 'offset'] <- offset
+    # save the item size
+    if (next_pos > 1) {
+      toc.entries[next_pos-1, 'item_size'] <- offset - last_offset
+    }
+    last_offset <- offset
   }
 }
-toc.entries
+# calculate the last item size with the global constant
+toc.entries[next_pos, 'item_size'] <- header.tables_end - last_offset
+```
+
+Read the Tags, this is the list of all variables connected to the server monitoring the system.
+```{r}
+# create empty data frame to hold all tags
+tags.entries <- data.frame()
+
+tags_index <- toc.entries$name == 'VAR'
+tags <- toc.entries[tags_index,]
+# location of offsets of all objects in this table has a constant length
+tags_offsets <- tags$offset + 0x34
+# iterate thru all the VARs (tags) and get their names
+for(i in 1:tags$entries) {
+  # location of offset of current item
+  tag_offset <- tags_offsets + (i-1)*4
+  # relative offset of current item (from beginning of datablock)
+  tag_offset_relative <- d4(tag_offset)
+  # absolute offset of current item (from beginning of file)
+  tag_offset <- tag_offset_relative + tags_offsets + tags$entries*4
+
+  # String type? Either 3 or 0xb (which is 3+8 - probably some flag)
+  type <- d2(tag_offset)
+  # name length - in 16bits UTF16 Little Endian characters
+  len <- d2(tag_offset+2)
+  # name of tag
+  name_start <- tag_offset+4 + 1
+  name_characters <- list(fwx.data[(name_start):(name_start+len*2-1)])
+  name <- iconv(name_characters, "UTF-16LE", "UTF-8")
+  # must align by 4 bytes the length of the string (in bytes)
+  align <- (len*2) %% 4
+  data_offset <- tag_offset+4+len*2+align
+  # Some data?
+  data_len <- d4(data_offset) # length of current tag, almost always = 2
+  data53 <- d2(data_offset+4) # this value is almost always 0x35=53
+  idx <- d2(data_offset+6) # this is a running index if data53==53
+  dat_offset <- d2(data_offset+8) # this is almost always zero except in cases where data53 != 53
+  data80E3 <- d4(data_offset+10) # this value is always = 0x80E3 
+  data00 <- d2(data_offset+14) # this value is always = 0
+  
+  # create a data.frame row
+  next_pos <- dim(tags.entries)[1]+1
+  tags.entries[next_pos, 'type'] <- type
+  tags.entries[next_pos, 'name'] <- name
+  tags.entries[next_pos, 'offset'] <- tag_offset
+  tags.entries[next_pos, 'data_len'] <- data_len
+  tags.entries[next_pos, 'data53'] <- data53
+  tags.entries[next_pos, 'idx'] <- idx
+  tags.entries[next_pos, 'data_offset'] <- dat_offset
+  tags.entries[next_pos, 'data80E3'] <- data80E3
+  tags.entries[next_pos, 'data00'] <- data00
+  
+  if (data_len > 0) {
+    data01 <- d2(data_offset+16) # always 0
+    data227 <- d2(data_offset+18) # almost always 227
+    # data type can be:
+    # 0x82: INT - signed 16 bits word between -32768 and +32767
+    # 0x83: LONG - signed 32 bits double word between -2147483648 and +2147483647
+    # 0x84: Real - between -3.402823E+38 and +3.402823E+38
+    # 0x85: Double - between -1.79769313486232E+308 and +1.79769313486232E+308
+    # 0x86: VT_CY
+    # 0x87: VT_DATE
+    # 0x88: STRING
+    # 0x89: VT_DISPATCH
+    # 0x8a: VT_ERROR
+    # 0x8b: BOOL - Boolean value of either 0 or -1
+    # 0x90: Char - between -128 and 127
+    # 0x91: BYTE - Unsigned 8 bits values between 0 and 255
+    # 0x92: UINT - Unsigned 16 bits values between 0 and 65535
+    # 0x93: ULong - Unsigned 32 bits vlues between 0 and 4294967295
+    # 0x94: VT_I8
+    # 0x95: VT_UI8
+    # Arrays begin with 0x2000
+    # 0x2002: Arrays of INTs
+    # 0x2092: Arrays of UINTs
+    data_type <- d2(data_offset+20)
+    
+    array_size <- d2(data_offset+22) # number of sub element, usually = 1 unless it is an array
+    
+    data_pos <- d2(data_offset+24) # successive numbers with skips of almost always 4
+    data02 <- d2(data_offset+26) # this value is always = 0
+    data03 <- d2(data_offset+28) # this value is always = 0
+    data04 <- d2(data_offset+30) # this value is always = 0
+    
+    # for data_len 3 - everything shifted by 8 bytes
+    if (data_len == 3) {
+      data227 <- data02
+      data_type <- data03
+      array_size <- data04
+      data_pos <- d2(data_offset+32)
+      data02 <- d2(data_offset+34) # this value is always = 0
+      data03 <- d2(data_offset+36) # this value is always = 0
+      data04 <- d2(data_offset+38) # this value is always = 0
+    }
+
+    tags.entries[next_pos, 'data01'] <- data01
+    tags.entries[next_pos, 'data227'] <- data227
+    tags.entries[next_pos, 'data_type'] <- data_type
+    tags.entries[next_pos, 'array_size'] <- array_size
+    tags.entries[next_pos, 'data_pos'] <- data_pos
+    tags.entries[next_pos, 'data02'] <- data02
+    tags.entries[next_pos, 'data03'] <- data03
+    tags.entries[next_pos, 'data04'] <- data04
+  }
+  
+  # save the item size
+  if (next_pos > 1) {
+    tags.entries[next_pos-1, 'item_size'] <- tag_offset - last_offset
+  }
+  last_offset <- tag_offset
+}
+# calculate the last item size with the size of the parent table
+tags.entries[next_pos, 'item_size'] <- tags$offset + tags$item_size - last_offset
+# View the tags (TODO: Create HTML to view all tags)
+View(tags.entries)
 ```
