@@ -20,6 +20,7 @@ library("bitops")
 Reads the main configuration file: Binary strings, images and settings.
 ```{r}
 fwx.name <- "G:/Documents and Settings/WinXP/My Documents/simatic/PDATA.FWX"
+fwx.html <- "G:/Documents and Settings/WinXP/My Documents/simatic/tags.html"
 fwx.size <- file.size(fwx.name)
 fwx.handle <- file(fwx.name, "rb")
 fwx.data <- readBin(fwx.handle, "raw", fwx.size)
@@ -30,7 +31,7 @@ rm("fwx.handle")
 
 Functions:
 ```{r}
-# Read 16 bits unsigned little endian word
+# Read 16 bits little endian word
 d2 <- function(pos) {
   arr2 <- fwx.data[(pos+1):(pos+2)]
   d <- as.integer(arr2)
@@ -43,17 +44,90 @@ d4 <- function(pos) {
   d <- as.integer(arr4)
   d[1] + bitShiftL(d[2], 8) + bitShiftL(d[3], 16) + bitShiftL(d[4], 24)
 }
+
+# convert a UTF16-LE string (type of strings in FWX file) into UTF-8
+# for some reason it does not display well non-latin characters
+get_name <- function(offset) {
+  # name length - in 16bits UTF16 Little Endian characters
+  len <- d2(offset)
+  name_start <- offset+2
+  name_characters <- list(fwx.data[(name_start+1):(name_start+len*2)])
+  name <- iconv(name_characters, "UTF-16LE", "UTF-8")
+}
+
+# Convert a type code to a type name
+# data type can be:
+data.types <- data.frame()
+data.types[1,"code"] <- 0x00 # Permitted data types codes
+data.types[1,"name"] <- "UNKNOWN" # Name of data type
+data.types[1,"len"] <- 0 # how many bytes it occupies
+data.types[1,"min"] <- NA # minimum value
+data.types[1,"max"] <- NA # maximum value
+# 0x82: INT - signed 16 bits word between -32768 and +32767
+data.types <- rbind(data.types, c(0x82,"INT",2,-32768, 32767))
+# 0x83: LONG - signed 32 bits double word between -2147483648 and +2147483647
+data.types <- rbind(data.types, c(0x83,"LONG",4,-2147483648, 2147483647))
+# 0x84: Real - between -3.402823E38 to -1.401298E-45 for negative values and 1.401298E-45 to 3.402823E38 for positive values
+data.types <- rbind(data.types, c(0x84,"FLOAT",4,"-3.402823E+38","3.402823E+38"))
+# 0x85: Double - between -1.79769313486231E308 to -4.94065645841247E-324 for negative values and 4.94065645841247E-324 to 1.79769313486232E308 for positive values
+data.types <- rbind(data.types, c(0x85, "DOUBLE",8, "-1.79769313486232E+308", "1.79769313486232E+308"))
+# 0x86: VT_CY
+data.types <- rbind(data.types, c(0x86, "VT_CY", NA, NA, NA))
+# 0x87: VT_DATE
+data.types <- rbind(data.types, c(0x87, "VT_DATE", 8, "1.1.1970 00:00:00", "31.12.2037 23:59:59"))
+# 0x88: STRING
+data.types <- rbind(data.types, c(0x88, "STRING", "1-255", NA, NA))
+# 0x89: VT_DISPATCH
+data.types <- rbind(data.types, c(0x89, "VT_DISPATCH", NA, NA, NA))
+# 0x8a: VT_ERROR
+data.types <- rbind(data.types, c(0x8a, "VT_ERROR", NA, NA, NA))
+# 0x8b: BOOL - Boolean value of either 0 or -1
+data.types <- rbind(data.types, c(0x8b, "BOOL", 0, -1, 0))
+# 0x90: Char - between -128 and 127
+data.types <- rbind(data.types, c(0x90, "CHAR", 1, -128, 127))
+# 0x91: BYTE - Unsigned 8 bits values between 0 and 255
+data.types <- rbind(data.types, c(0x91, "BYTE", 1, 0, 255))
+# 0x92: UINT - Unsigned 16 bits values between 0 and 65535
+data.types <- rbind(data.types, c(0x92, "UINT", 2, 0, 65535))
+# 0x93: ULong - Unsigned 32 bits vlues between 0 and 4294967295
+data.types <- rbind(data.types, c(0x93, "ULONG", 4, 0, 4294967295))
+# 0x94: VT_I8
+data.types <- rbind(data.types, c(0x94, "VT_I8", 8, NA, NA))
+# 0x95: VT_UI8
+data.types <- rbind(data.types, c(0x95, "VT_UI8", 8, NA, NA))
+# Arrays begin with 0x2000
+# 0x2002: Arrays of INTs
+# 0x2092: Arrays of UINTs
+type2info <- function(type_code) {
+  if (is.na(type_code)) {
+    return(data.types[data.types$code==0x00,])
+  }
+  # types larger than 0x2000 are arrays
+  if (type_code>=0x2000) {
+    type_code <- type_code-0x2000
+  }
+  # extract the correct data type
+  type=data.types[data.types$code==type_code,]
+  if (dim(type)[1]!=0) {
+    return(type)
+  } else {
+    # create an unknown empty type
+    type=data.types[data.types$code==0x00,]
+    type$code=type_code
+    return(type)
+  }
+}
 ```
 
-Not sure if it should be 16bit or not, because it always looks the same, the data type are always Little Endian (LSB first)
+Not sure if it should be 16bit or not, because it always looks the same, the data types are always Little Endian (LSB first)
 The first 6 words of 16bit are always the same
 ```{r}
-header.start1 <- d2(0)
-header.start2 <- d2(2)
-header.start3 <- d2(4)
-header.start4 <- d2(6)
-header.start5 <- d2(8)
-header.start6 <- d2(0xa)
+header.start1 <- d2(0) # 0xbeef
+header.start2 <- d2(2) # 0xc
+header.start3 <- d2(4) # 0x1
+header.start4 <- d2(6) # 0x703
+header.start5 <- d2(8) # 0x1
+header.start6 <- d2(0xa) # 0x1
 ```
 
 These two double words seems to say how big is the padding at the last section of the file
@@ -124,12 +198,8 @@ for(i in 1:length(toc)) {
     parent <- d2(offset+4)
     # table id - this number is identical to the index i
     id <- d2(offset+6)
-    # name length - in 16bits UTF16 Little Endian characters
-    len <- d2(offset+8)
     # name of table
-    name_start <- offset+0xa+1
-    name_characters <- list(fwx.data[(name_start):(name_start+len*2-1)])
-    name <- iconv(name_characters, "UTF-16LE", "UTF-8")
+    name <- get_name(offset+8)
     
     # create a data.frame row
     next_pos <- dim(toc.entries)[1]+1
@@ -148,6 +218,7 @@ for(i in 1:length(toc)) {
 }
 # calculate the last item size with the global constant
 toc.entries[next_pos, 'item_size'] <- header.tables_end - last_offset
+View(toc.entries)
 ```
 
 Read the Tags, this is the list of all variables connected to the server monitoring the system.
@@ -170,13 +241,10 @@ for(i in 1:tags$entries) {
 
   # String type? Either 3 or 0xb (which is 3+8 - probably some flag)
   type <- d2(tag_offset)
-  # name length - in 16bits UTF16 Little Endian characters
-  len <- d2(tag_offset+2)
   # name of tag
-  name_start <- tag_offset+4 + 1
-  name_characters <- list(fwx.data[(name_start):(name_start+len*2-1)])
-  name <- iconv(name_characters, "UTF-16LE", "UTF-8")
+  name <- get_name(tag_offset+2)
   # must align by 4 bytes the length of the string (in bytes)
+  len <- d2(tag_offset+2)
   align <- (len*2) %% 4
   data_offset <- tag_offset+4+len*2+align
   # Some data?
@@ -201,29 +269,11 @@ for(i in 1:tags$entries) {
   
   if (data_len > 0) {
     data01 <- d2(data_offset+16) # always 0
-    data227 <- d2(data_offset+18) # almost always 227
-    # data type can be:
-    # 0x82: INT - signed 16 bits word between -32768 and +32767
-    # 0x83: LONG - signed 32 bits double word between -2147483648 and +2147483647
-    # 0x84: Real - between -3.402823E+38 and +3.402823E+38
-    # 0x85: Double - between -1.79769313486232E+308 and +1.79769313486232E+308
-    # 0x86: VT_CY
-    # 0x87: VT_DATE
-    # 0x88: STRING
-    # 0x89: VT_DISPATCH
-    # 0x8a: VT_ERROR
-    # 0x8b: BOOL - Boolean value of either 0 or -1
-    # 0x90: Char - between -128 and 127
-    # 0x91: BYTE - Unsigned 8 bits values between 0 and 255
-    # 0x92: UINT - Unsigned 16 bits values between 0 and 65535
-    # 0x93: ULong - Unsigned 32 bits vlues between 0 and 4294967295
-    # 0x94: VT_I8
-    # 0x95: VT_UI8
-    # Arrays begin with 0x2000
-    # 0x2002: Arrays of INTs
-    # 0x2092: Arrays of UINTs
-    data_type <- d2(data_offset+20)
-    
+    data227 <- d2(data_offset+18) # almost always 227 unless it is an array then it is something like 0x8000 or 0x8019
+
+    # see type2name() function for more info about types (INT, Byte...)
+    data_type <- d2(data_offset+20) # type code
+
     array_size <- d2(data_offset+22) # number of sub element, usually = 1 unless it is an array
     
     data_pos <- d2(data_offset+24) # successive numbers with skips of almost always 4
@@ -260,6 +310,109 @@ for(i in 1:tags$entries) {
 }
 # calculate the last item size with the size of the parent table
 tags.entries[next_pos, 'item_size'] <- tags$offset + tags$item_size - last_offset
-# View the tags (TODO: Create HTML to view all tags)
+# View the tags
 View(tags.entries)
+```
+
+Create HTML page with MiniWeb Server Language (MWSL) to view the values of all variables
+
+**TODO:**
+
+- [ ] Correct the names with non-latin letters
+- [ ] support tags with data_len = 0 - they probably have more meta info
+
+```{r}
+# creates an html file
+html.handle<-file(fwx.html,'w')
+# write header of HTML page
+cat(
+  # HTML Headers
+  '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">',
+  '<html>',
+  '<head>',
+  '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">',
+  # Page title
+  '<title>MWSL Variables</title>',
+  '</head>',
+  '<body scroll="auto">',
+  # Page header
+  '<h1>MiniWeb Server Language (MWSL) page</h1>',
+  '<p>If values are empty, check the Page Source by right clicking on the page and selecting View page Source...</p>',
+  # Explanation in case HTTP is not supported in the FWX
+  '<p>If you get something like:</p>',
+  '<pre style="background-color: #c0c0c0;">',
+  '&lt;!-- *** SCRIPT ERROR *** ---',
+  paste('Unknown Variable: ',tags.entries[1,'name'],'.',sep=''),
+  '</pre>',
+  '<p>It means your FWX does not support HTTP variables, and you need to add the WEBLINK tag to it</p>',
+  # Explanation in case Variable name is incorrect
+  '<p>If on the other hand you get something like:</p>',
+  '<pre style="background-color: #c0c0c0;">',
+  '&lt;!-- *** SCRIPT ERROR *** ---',
+  'Script error detected at position 29 in line:',
+  '&lt;!--',
+  '                             ^- Parse Position',
+  'Error: Error calling function \'GetVar\' result d4810013.',
+  '</pre>',
+  '<p>It means that HTTP is supported but either this variable name does not exist, or you are trying to read an array variable (with brackets []) which is impossible to accomplish with HTTP according to Simatic HMI HTTP Protocol rules.<p>',
+  '<table border="1">',
+  # Column names of table
+  '<tr><th>Variable</th><th>Data type</th><th>Value</th><th>Min Value</th><th>Max Value</th></tr>',
+  sep = '\n',file=html.handle
+)
+
+# Create an HTML table with a single line for each variable
+#   and creates a single line for each element in an array
+for(i in 1:(tags$entries)) {
+  # get current entry
+  entry <- tags.entries[i,]
+  arr_size <- entry$array_size
+  if (is.na(arr_size)) {
+    arr_size <- 1
+  }
+  # print a line for every item in the array
+  type <- type2info(entry$data_type)
+  for (j in 1:(arr_size)) {
+    array.index <- ''
+    array.size <- ''
+    if (arr_size > 1) {
+      array.index <- paste('[',j-1,']',sep='')
+      array.size <- paste('[',arr_size,']',sep='')
+    }
+    value.min <- ''
+    value.max <- ''
+    if (!is.na(type$min)) {
+      value.min <- type$min
+    }
+    if (!is.na(type$max)) {
+      value.max <- type$max
+    }
+    # create a table raw with MWSL command to read tag value
+    cat(
+      '<tr><td>',
+      paste(entry$name,array.index,sep=''),
+      '</td><td>',
+      paste(type$name,array.size,sep=''),
+      '</td><td>',
+      '<MWSL><!-- write(GetVar("',
+      paste(entry$name,array.index,sep=''),
+      '")); --></MWSL>',
+      '</td><td>',
+      value.min,
+      '</td><td>',
+      value.max,
+      '</td></tr>\n',
+      sep='', file=html.handle, append = T
+    )
+  }
+}
+# write footer of HTML page
+cat(
+  '</table>',
+  '</body>',
+  '</html>',
+  sep = '\n',file=html.handle
+)
+# close the html file
+close(html.handle)
 ```
