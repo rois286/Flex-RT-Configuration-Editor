@@ -56,7 +56,8 @@ This allowed us to connect with [Putty](https://putty.org), and transfer files t
 For the moment, possible scenarios are:
 
 1. Maybe there is an option to create a Recipe and export it with ProSave.
-1. Capture the screen with [VNC](https://en.wikipedia.org/wiki/Virtual_Network_Computing) and do [OCR](https://en.wikipedia.org/wiki/Optical_character_recognition). Cons: there are different screens which require different OCR methods, and sometimes we can be inside a screen which does not show the O2/H2O measurements
+1. Purchase an RS-485 serial port for the PC and connect to the S7 directly thru Windows XP which can be monitored by MWSL HTML tags (after injection of the WEBLINK table).
+1. Capture the screen with [VNC](https://en.wikipedia.org/wiki/Virtual_Network_Computing) and do [OCR](https://en.wikipedia.org/wiki/Optical_character_recognition). Cons: there are different screens which require different OCR methods, and sometimes we can be inside a screen which does not show the O2/H2O measurements.
 1. Use some kind of serial port sniffer, because the HMI is connected thru RS-485 serial port to the S7 computer, thus something like [IO Ninja](https://ioninja.com) can be suitable to sniff the datagrams. Cons: It costs money, and if it'll break down - we have to disassemble it because it'll interrupt the communication.
 
 And for the screen:
