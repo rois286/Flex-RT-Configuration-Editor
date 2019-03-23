@@ -46,7 +46,8 @@ d4 <- function(pos) {
 }
 
 # convert a UTF16-LE string (type of strings in FWX file) into UTF-8
-# for some reason it does not display well non-latin characters
+# Only the RStudio View does not display well non-latin characters
+#   but these characters are preserved well
 get_name <- function(offset) {
   # name length - in 16bits UTF16 Little Endian characters
   len <- d2(offset)
@@ -318,11 +319,20 @@ Create HTML page with MiniWeb Server Language (MWSL) to view the values of all v
 
 **TODO:**
 
-- [ ] Correct the names with non-latin letters
 - [ ] support tags with data_len = 0 - they probably have more meta info
 
 ```{r}
-# creates an html file
+# check if HTTP is enabled in the FWX
+is_weblink <- 'WEBLINK' %in% toc.entries$name
+is_startproc <- 'FUNC_STARTPROC' %in% toc.entries$name
+is_http <- 'none'
+if (is_weblink && is_startproc) {
+  is_http <- 'both'
+} else if (is_weblink || is_startproc) {
+  is_http <- 'at least one'
+}
+
+# creates a UTF-8 html file
 html.handle<-file(fwx.html,'w')
 # write header of HTML page
 cat(
@@ -331,20 +341,28 @@ cat(
   '<html>',
   '<head>',
   '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">',
-  # Page title
+  
+  # Page title (in the browser window)
   '<title>MWSL Variables</title>',
   '</head>',
   '<body scroll="auto">',
+  
   # Page header
-  '<h1>MiniWeb Server Language (MWSL) page</h1>',
+  paste('<h1>MiniWeb Server Language (MWSL) page, with ',tags$entries,' variables</h1>',sep=''),
   '<p>If values are empty, check the Page Source by right clicking on the page and selecting View page Source...</p>',
+  
   # Explanation in case HTTP is not supported in the FWX
   '<p>If you get something like:</p>',
   '<pre style="background-color: #c0c0c0;">',
   '&lt;!-- *** SCRIPT ERROR *** ---',
   paste('Unknown Variable: ',tags.entries[1,'name'],'.',sep=''),
   '</pre>',
-  '<p>It means your FWX does not support HTTP variables, and you need to add the WEBLINK tag to it</p>',
+  paste('<p>It means your FWX does not support HTTP variables, and you need to add the following to the Table Of Contents entries from which ',is_http,' exist:',sep=''),
+  '<ol>',
+  paste('<li><code>WEBLINK exists</code> in the file? <b>',is_weblink,'</b>',sep=''),
+  paste('<li><code>FUNC_STARTPROC</code> exists in the file? <b>',is_startproc,'</b>',sep=''),
+  '</ol>',
+  
   # Explanation in case Variable name is incorrect
   '<p>If on the other hand you get something like:</p>',
   '<pre style="background-color: #c0c0c0;">',
@@ -356,6 +374,7 @@ cat(
   '</pre>',
   '<p>It means that HTTP is supported but either this variable name does not exist, or you are trying to read an array variable (with brackets []) which is impossible to accomplish with HTTP according to Simatic HMI HTTP Protocol rules.<p>',
   '<table border="1">',
+  
   # Column names of table
   '<tr><th>Variable</th><th>Data type</th><th>Value</th><th>Min Value</th><th>Max Value</th></tr>',
   sep = '\n',file=html.handle
@@ -388,8 +407,7 @@ for(i in 1:(tags$entries)) {
       value.max <- type$max
     }
     # create a table raw with MWSL command to read tag value
-    cat(
-      '<tr><td>',
+    tr <- c('<tr><td>',
       paste(entry$name,array.index,sep=''),
       '</td><td>',
       paste(type$name,array.size,sep=''),
@@ -401,9 +419,10 @@ for(i in 1:(tags$entries)) {
       value.min,
       '</td><td>',
       value.max,
-      '</td></tr>\n',
-      sep='', file=html.handle, append = T
-    )
+      '</td></tr>\n')
+    
+    # needs useBytes in order to write UTF-8 characters like ü instead of <U+00FC>
+    writeLines(tr, con=html.handle, sep='', useBytes = TRUE)
   }
 }
 # write footer of HTML page
