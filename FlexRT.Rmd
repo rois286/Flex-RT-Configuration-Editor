@@ -19,7 +19,7 @@ library("bitops")
 
 Reads the main configuration file: Binary strings, images and settings.
 ```{r}
-fwx.name <- "G:/Documents and Settings/WinXP/My Documents/simatic/PDATA.FWX"
+fwx.name <- "G:/Documents and Settings/WinXP/My Documents/simatic/PDATA.fwx"
 fwx.html <- "G:/Documents and Settings/WinXP/My Documents/simatic/tags.html"
 fwx.size <- file.size(fwx.name)
 fwx.handle <- file(fwx.name, "rb")
@@ -31,6 +31,13 @@ rm("fwx.handle")
 
 Functions:
 ```{r}
+# Read 8 bits
+d1 <- function(pos) {
+  arr1 <- fwx.data[pos+1]
+  d <- as.integer(arr1)
+  d[1]
+}
+
 # Read 16 bits little endian word
 d2 <- function(pos) {
   arr2 <- fwx.data[(pos+1):(pos+2)]
@@ -222,6 +229,114 @@ toc.entries[next_pos, 'item_size'] <- header.tables_end - last_offset
 View(toc.entries)
 ```
 
+Read Datalink which says what is the polling interval of each variable from the S7 server
+```{r}
+datalink_index <- toc.entries$name == 'DATALINK_READWR'
+datalink <- toc.entries[datalink_index,]
+
+# location of offsets of all objects in this table has a constant length
+datalinks_offsets <- datalink$offset + 0x34
+
+# create empty data frame to hold all datalinks
+dl.entries <- data.frame()
+
+# The number of entries should be the same number as the VAR with each array item counted individually
+# e.g.: array[3] + var1 + var2 = 5 items
+for (i in 1:datalink$entries) {
+  # location of offset of current item
+  datalink_offset <- datalinks_offsets + (i-1)*4
+  # relative offset of current item (from beginning of datablock)
+  datalink_offset_relative <- d4(datalink_offset)
+  # absolute offset of current item (from beginning of file)
+  datalink_offset <- datalink_offset_relative + datalinks_offsets + datalink$entries*4
+  
+  d1a <- d4(datalink_offset) # always 1
+  d1b <- d4(datalink_offset+4) # always 1
+  d10 <- d4(datalink_offset+8) # always 0xa = 10
+  d5 <- d2(datalink_offset+0xc) # always 5
+  d32773 <- d2(datalink_offset+0xe) # always 0x8005 = 32773
+  acq <- d4(datalink_offset+0x10) # Acquisition cycle (in milliseconds)
+  d258 <- d2(datalink_offset+0x14) # always 0x102 = 256
+  d0a <- d2(datalink_offset+0x16) # always 0
+  d9 <- d4(datalink_offset+0x18) # always 9
+  d0b <- d2(datalink_offset+0x1c) # Always 0
+  # see get_dldt()
+  data_type <- d1(datalink_offset+0x1e) # data_type
+
+  # these two items represent the address of the tag
+  database <- d2(datalink_offset+0x1f)
+  database_offset <- d2(datalink_offset+0x21)
+
+  data23 <- d1(datalink_offset+0x23)  
+  data24 <- d2(datalink_offset+0x24)  
+  data26 <- d2(datalink_offset+0x26)
+  data28 <- d2(datalink_offset+0x28)
+  array_size <- d2(datalink_offset+0x2a) # array size (usually 1 for a single primitive)
+  
+  # create a data.frame row
+  next_pos <- dim(dl.entries)[1]+1
+  dl.entries[next_pos, 'idx'] <- i-1
+  dl.entries[next_pos, 'd1a'] <- d1a
+  dl.entries[next_pos, 'd1b'] <- d1b
+  dl.entries[next_pos, 'd10'] <- d10
+  dl.entries[next_pos, 'd5'] <- d5
+  dl.entries[next_pos, 'd32773'] <- d32773
+  dl.entries[next_pos, 'acq'] <- acq
+  dl.entries[next_pos, 'd258'] <- d258
+  dl.entries[next_pos, 'd0a'] <- d0a
+  dl.entries[next_pos, 'd9'] <- d9
+  dl.entries[next_pos, 'd0b'] <- d0b
+  dl.entries[next_pos, 'data_type'] <- data_type
+  dl.entries[next_pos, 'DB'] <- database
+  dl.entries[next_pos, 'DBOFFSET'] <- database_offset
+  dl.entries[next_pos, 'd23'] <- data23
+  dl.entries[next_pos, 'd24'] <- data24
+  dl.entries[next_pos, 'd26'] <- data26
+  dl.entries[next_pos, 'd28'] <- data28
+  dl.entries[next_pos, 'array_size'] <- array_size
+
+  if (d0a == 0) {
+    d7 <- d4(datalink_offset+0x2c) # always 7
+    dl.entries[next_pos, 'd7'] <- d7
+  }
+  
+  # save the item size
+  if (next_pos > 1) {
+    dl.entries[next_pos-1, 'item_size'] <- datalink_offset - last_offset
+  }
+  last_offset <- datalink_offset
+}
+# calculate the last item size with the size of the parent table
+dl.entries[next_pos, 'item_size'] <- datalink$offset + datalink$item_size - last_offset
+View(dl.entries)
+
+# convert a DataLink DataType into a single letter
+datalink_datatypes <- c('B','B','W','W','D','D','D','X','B','W','W','W','D','B','B','?')
+get_dldt <- function(data_type) {
+  # 0=B (Char)
+  # 1=B (Byte)
+  # 2=W (Int)
+  # 3=W (Word)
+  # 4=D (DInt/Time)
+  # 5=D (DWord)
+  # 6=D (Real)
+  # 7=X (Bool)
+  # 8=B (String)
+  # 9=W (Timer)
+  # 10=W (Counter)
+  # 11=W (Date)
+  # 12=D (Time of day)
+  # 13=B (Date and time)
+  # 14=B (StringChar)
+
+  if (data_type >= 0 && data_type <= 14) {
+    return(datalink_datatypes[data_type+1])
+  } else {
+    return(datalink_datatypes[length(datalink_datatypes)])
+  }
+}
+```
+
 Read the Tags, this is the list of all variables connected to the server monitoring the system.
 ```{r}
 # create empty data frame to hold all tags
@@ -376,7 +491,7 @@ cat(
   '<table border="1">',
   
   # Column names of table
-  '<tr><th>Variable</th><th>Data type</th><th>Value</th><th>Min Value</th><th>Max Value</th></tr>',
+  '<tr><th>Address</th><th>Variable</th><th>Data type</th><th>Value</th><th>Min Value</th><th>Max Value</th><th>Acquisition cycle [ms]</th></tr>',
   sep = '\n',file=html.handle
 )
 
@@ -406,8 +521,27 @@ for(i in 1:(tags$entries)) {
     if (!is.na(type$max)) {
       value.max <- type$max
     }
+    # extract datalink info
+    datalink <- dl.entries[dl.entries$idx == entry$idx,]
+    if (datalink$d0a == 0) {
+      db <- datalink$DB
+      dboff <- datalink$DBOFFSET
+      dbchar <- get_dldt(datalink$data_type)
+      # extract address
+      address <- paste('DB',db,'DB',dbchar,dboff,sep='')
+      if (dbchar == 'X') {
+        address <- paste(address,'.0',sep='')
+      }
+    } else {
+      address <- ''
+    }
+    # extractio acquisition time
+    acq <- datalink$acq
+
     # create a table raw with MWSL command to read tag value
     tr <- c('<tr><td>',
+      address,
+      '</td><td>',
       paste(entry$name,array.index,sep=''),
       '</td><td>',
       paste(type$name,array.size,sep=''),
@@ -419,6 +553,8 @@ for(i in 1:(tags$entries)) {
       value.min,
       '</td><td>',
       value.max,
+      '</td><td>',
+      acq,
       '</td></tr>\n')
     
     # needs useBytes in order to write UTF-8 characters like ü instead of <U+00FC>
