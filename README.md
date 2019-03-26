@@ -1,5 +1,5 @@
 # Flex-RT-Configuration-Editor
-Edit WinCC flexible RT Modules FWX Binary files
+Edit WinCC flexible RT Modules FWX Binary files (PDATA.FWX)
 
 Written in R programming language.
 
