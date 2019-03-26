@@ -204,7 +204,7 @@ for(i in 1:length(toc)) {
     type <- d2(offset+2)
     # parent id? all tables have this 0x01 number
     parent <- d2(offset+4)
-    # table id - this number is identical to the index i
+    # table id - this number is identical to the index i-1
     id <- d2(offset+6)
     # name of table
     name <- get_name(offset+8)
@@ -229,6 +229,42 @@ toc.entries[next_pos, 'item_size'] <- header.tables_end - last_offset
 View(toc.entries)
 ```
 
+Convert Datalink type into a letter
+```{r}
+# convert a DataLink DataType into a single letter
+datalink_datatypes <- c('B','B','W','W','D','D','D','X','B','W','W','W','D','B','B','?')
+get_dldt <- function(data_type) {
+  # 0=B (Char)
+  # 1=B (Byte)
+  # 2=W (Int)
+  # 3=W (Word)
+  # 4=D (DInt/Time)
+  # 5=D (DWord)
+  # 6=D (Real)
+  # 7=X (Bool)
+  # 8=B (String)
+  # 9=W (Timer)
+  # 10=W (Counter)
+  # 11=W (Date)
+  # 12=D (Time of day)
+  # 13=B (Date and time)
+  # 14=B (StringChar)
+
+  if (data_type >= 0 & data_type <= 14) {
+    return(datalink_datatypes[data_type+1])
+  } else {
+    return(datalink_datatypes[length(datalink_datatypes)])
+  }
+}
+
+# convert number of bits to a single letter
+bits2char_arr <- c('X','','','B','W','D','D')
+bits2char <- function(bits) {
+  return(bits2char_arr[log2(bits)+1])
+}
+```
+
+
 Read Datalink which says what is the polling interval of each variable from the S7 server
 ```{r}
 datalink_index <- toc.entries$name == 'DATALINK_READWR'
@@ -240,8 +276,7 @@ datalinks_offsets <- datalink$offset + 0x34
 # create empty data frame to hold all datalinks
 dl.entries <- data.frame()
 
-# The number of entries should be the same number as the VAR with each array item counted individually
-# e.g.: array[3] + var1 + var2 = 5 items
+# The number of entries should be the same number as the VAR
 for (i in 1:datalink$entries) {
   # location of offset of current item
   datalink_offset <- datalinks_offsets + (i-1)*4
@@ -267,10 +302,10 @@ for (i in 1:datalink$entries) {
   database <- d2(datalink_offset+0x1f)
   database_offset <- d2(datalink_offset+0x21)
 
-  data23 <- d1(datalink_offset+0x23)  
+  bit_position <- d1(datalink_offset+0x23)  
   data24 <- d2(datalink_offset+0x24)  
   data26 <- d2(datalink_offset+0x26)
-  data28 <- d2(datalink_offset+0x28)
+  bits <- d2(datalink_offset+0x28)
   array_size <- d2(datalink_offset+0x2a) # array size (usually 1 for a single primitive)
   
   # create a data.frame row
@@ -289,15 +324,26 @@ for (i in 1:datalink$entries) {
   dl.entries[next_pos, 'data_type'] <- data_type
   dl.entries[next_pos, 'DB'] <- database
   dl.entries[next_pos, 'DBOFFSET'] <- database_offset
-  dl.entries[next_pos, 'd23'] <- data23
+  dl.entries[next_pos, 'bit_position'] <- bit_position
   dl.entries[next_pos, 'd24'] <- data24
   dl.entries[next_pos, 'd26'] <- data26
-  dl.entries[next_pos, 'd28'] <- data28
+  dl.entries[next_pos, 'bits'] <- bits
   dl.entries[next_pos, 'array_size'] <- array_size
 
   if (d0a == 0) {
     d7 <- d4(datalink_offset+0x2c) # always 7
     dl.entries[next_pos, 'd7'] <- d7
+
+    # calculate the address
+    dbchar <- bits2char(bits)
+    dbchar <- 'D'
+    # extract address
+    address <- paste('DB',database,'DB',dbchar,database_offset,sep='')
+    if (dbchar == 'X') {
+      address <- paste(address,'.',bit_position,sep='')
+    }
+
+    dl.entries[next_pos, 'address'] <- address
   }
   
   # save the item size
@@ -309,32 +355,6 @@ for (i in 1:datalink$entries) {
 # calculate the last item size with the size of the parent table
 dl.entries[next_pos, 'item_size'] <- datalink$offset + datalink$item_size - last_offset
 View(dl.entries)
-
-# convert a DataLink DataType into a single letter
-datalink_datatypes <- c('B','B','W','W','D','D','D','X','B','W','W','W','D','B','B','?')
-get_dldt <- function(data_type) {
-  # 0=B (Char)
-  # 1=B (Byte)
-  # 2=W (Int)
-  # 3=W (Word)
-  # 4=D (DInt/Time)
-  # 5=D (DWord)
-  # 6=D (Real)
-  # 7=X (Bool)
-  # 8=B (String)
-  # 9=W (Timer)
-  # 10=W (Counter)
-  # 11=W (Date)
-  # 12=D (Time of day)
-  # 13=B (Date and time)
-  # 14=B (StringChar)
-
-  if (data_type >= 0 && data_type <= 14) {
-    return(datalink_datatypes[data_type+1])
-  } else {
-    return(datalink_datatypes[length(datalink_datatypes)])
-  }
-}
 ```
 
 Read the Tags, this is the list of all variables connected to the server monitoring the system.
@@ -523,19 +543,12 @@ for(i in 1:(tags$entries)) {
     }
     # extract datalink info
     datalink <- dl.entries[dl.entries$idx == entry$idx,]
-    if (datalink$d0a == 0) {
-      db <- datalink$DB
-      dboff <- datalink$DBOFFSET
-      dbchar <- get_dldt(datalink$data_type)
-      # extract address
-      address <- paste('DB',db,'DB',dbchar,dboff,sep='')
-      if (dbchar == 'X') {
-        address <- paste(address,'.0',sep='')
-      }
-    } else {
+    if (is.na(datalink$address)) {
       address <- ''
+    } else {
+      address <- datalink$address
     }
-    # extractio acquisition time
+    # extract io acquisition time
     acq <- datalink$acq
 
     # create a table raw with MWSL command to read tag value
