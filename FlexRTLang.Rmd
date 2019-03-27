@@ -1,0 +1,13 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+The FWX file will be export to Microsoft Excel. Which can be edited easily. Then exported back to FWX.
+```{r}
+if (! "xlsx" %in% rownames(installed.packages())) {
+  # install package to manipulate Excel files
+  install.packages("xlsx")
+}
+library('xlsx')
+```

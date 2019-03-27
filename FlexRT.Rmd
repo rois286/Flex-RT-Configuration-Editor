@@ -3,15 +3,6 @@ title: "Flex RT with R"
 output: html_notebook
 ---
 
-The FWX file will be export to Microsoft Excel. Which can be edited easily. Then exported back to FWX.
-```{r}
-if (! "xlsx" %in% rownames(installed.packages())) {
-  # install package to manipulate Excel files
-  install.packages("xlsx")
-}
-library('xlsx')
-```
-
 Bit operations like shift left
 ```{r}
 library("bitops")
@@ -64,48 +55,7 @@ get_name <- function(offset) {
 }
 
 # Convert a type code to a type name
-# data type can be:
-data.types <- data.frame()
-data.types[1,"code"] <- 0x00 # Permitted data types codes
-data.types[1,"name"] <- "UNKNOWN" # Name of data type
-data.types[1,"len"] <- 0 # how many bytes it occupies
-data.types[1,"min"] <- NA # minimum value
-data.types[1,"max"] <- NA # maximum value
-# 0x82: INT - signed 16 bits word between -32768 and +32767
-data.types <- rbind(data.types, c(0x82,"INT",2,-32768, 32767))
-# 0x83: LONG - signed 32 bits double word between -2147483648 and +2147483647
-data.types <- rbind(data.types, c(0x83,"LONG",4,-2147483648, 2147483647))
-# 0x84: Real - between -3.402823E38 to -1.401298E-45 for negative values and 1.401298E-45 to 3.402823E38 for positive values
-data.types <- rbind(data.types, c(0x84,"FLOAT",4,"-3.402823E+38","3.402823E+38"))
-# 0x85: Double - between -1.79769313486231E308 to -4.94065645841247E-324 for negative values and 4.94065645841247E-324 to 1.79769313486232E308 for positive values
-data.types <- rbind(data.types, c(0x85, "DOUBLE",8, "-1.79769313486232E+308", "1.79769313486232E+308"))
-# 0x86: VT_CY
-data.types <- rbind(data.types, c(0x86, "VT_CY", NA, NA, NA))
-# 0x87: VT_DATE
-data.types <- rbind(data.types, c(0x87, "VT_DATE", 8, "1.1.1970 00:00:00", "31.12.2037 23:59:59"))
-# 0x88: STRING
-data.types <- rbind(data.types, c(0x88, "STRING", "1-255", NA, NA))
-# 0x89: VT_DISPATCH
-data.types <- rbind(data.types, c(0x89, "VT_DISPATCH", NA, NA, NA))
-# 0x8a: VT_ERROR
-data.types <- rbind(data.types, c(0x8a, "VT_ERROR", NA, NA, NA))
-# 0x8b: BOOL - Boolean value of either 0 or -1
-data.types <- rbind(data.types, c(0x8b, "BOOL", 0, -1, 0))
-# 0x90: Char - between -128 and 127
-data.types <- rbind(data.types, c(0x90, "CHAR", 1, -128, 127))
-# 0x91: BYTE - Unsigned 8 bits values between 0 and 255
-data.types <- rbind(data.types, c(0x91, "BYTE", 1, 0, 255))
-# 0x92: UINT - Unsigned 16 bits values between 0 and 65535
-data.types <- rbind(data.types, c(0x92, "UINT", 2, 0, 65535))
-# 0x93: ULong - Unsigned 32 bits vlues between 0 and 4294967295
-data.types <- rbind(data.types, c(0x93, "ULONG", 4, 0, 4294967295))
-# 0x94: VT_I8
-data.types <- rbind(data.types, c(0x94, "VT_I8", 8, NA, NA))
-# 0x95: VT_UI8
-data.types <- rbind(data.types, c(0x95, "VT_UI8", 8, NA, NA))
-# Arrays begin with 0x2000
-# 0x2002: Arrays of INTs
-# 0x2092: Arrays of UINTs
+data.types <- read.csv('types.csv')
 type2info <- function(type_code) {
   if (is.na(type_code)) {
     return(data.types[data.types$code==0x00,])
@@ -200,8 +150,8 @@ for(i in 1:length(toc)) {
   if (offset != 0) {
     # how many entries exist in the current table
     entries <- d2(offset)
-    # table type? all tables have this type of 0x64
-    type <- d2(offset+2)
+    # table version? all tables have this type of 0x64, maybe 100 means version 1.00?
+    version <- d2(offset+2)
     # parent id? all tables have this 0x01 number
     parent <- d2(offset+4)
     # table id - this number is identical to the index i-1
@@ -212,7 +162,7 @@ for(i in 1:length(toc)) {
     # create a data.frame row
     next_pos <- dim(toc.entries)[1]+1
     toc.entries[next_pos, 'entries'] <- entries
-    toc.entries[next_pos, 'type'] <- type
+    toc.entries[next_pos, 'version'] <- version
     toc.entries[next_pos, 'parent'] <- parent
     toc.entries[next_pos, 'id'] <- id
     toc.entries[next_pos, 'name'] <- name
@@ -285,28 +235,32 @@ for (i in 1:datalink$entries) {
   # absolute offset of current item (from beginning of file)
   datalink_offset <- datalink_offset_relative + datalinks_offsets + datalink$entries*4
   
-  d1a <- d4(datalink_offset) # always 1
-  d1b <- d4(datalink_offset+4) # always 1
-  d10 <- d4(datalink_offset+8) # always 0xa = 10
-  d5 <- d2(datalink_offset+0xc) # always 5
-  d32773 <- d2(datalink_offset+0xe) # always 0x8005 = 32773
-  acq <- d4(datalink_offset+0x10) # Acquisition cycle (in milliseconds)
-  d258 <- d2(datalink_offset+0x14) # always 0x102 = 256
-  d0a <- d2(datalink_offset+0x16) # always 0
-  d9 <- d4(datalink_offset+0x18) # always 9
-  d0b <- d2(datalink_offset+0x1c) # Always 0
+  d1a <- d4(k <- datalink_offset) # always 1
+  d1b <- d4(k <- k+4) # always 1
+  d10 <- d4(k <- k+4) # always 0xa = 10
+  d5 <- d2(k <- k+4) # always 5
+  d32773 <- d2(k <- k+2) # always 0x8005 = 32773
+  acq <- d4(k <- k+2) # Acquisition cycle (in milliseconds)
+  d258 <- d2(k <- k+4) # always 0x102 = 256
+  d0a <- d2(k <- k+2) # always 0
+  d9 <- d4(k <- k+2) # always 9
+  d0b <- d2(k <- k+4) # Always 0
   # see get_dldt()
-  data_type <- d1(datalink_offset+0x1e) # data_type
+  data_type <- d1(k <- k+2) # data_type
 
-  # these two items represent the address of the tag
-  database <- d2(datalink_offset+0x1f)
-  database_offset <- d2(datalink_offset+0x21)
+  if (d0a == 0) {
+    # these two items represent the address of the tag
+    database <- d2(k <- k+1)
+    database_offset <- d2(k <- k+2)
+    k <- k+1
+  }
 
-  bit_position <- d1(datalink_offset+0x23)  
-  data24 <- d2(datalink_offset+0x24)  
-  data26 <- d2(datalink_offset+0x26)
-  bits <- d2(datalink_offset+0x28)
-  array_size <- d2(datalink_offset+0x2a) # array size (usually 1 for a single primitive)
+  bit_position <- d1(k <- k+1)
+  data24 <- d2(k <- k+1)  
+  data26 <- d2(k <- k+2)
+  bits <- d2(k <- k+2)
+  array_size <- d2(k <- k+2) # array size (usually 1 for a single primitive)
+  d7 <- d4(k <- k+2) # always 7
   
   # create a data.frame row
   next_pos <- dim(dl.entries)[1]+1
@@ -322,21 +276,20 @@ for (i in 1:datalink$entries) {
   dl.entries[next_pos, 'd9'] <- d9
   dl.entries[next_pos, 'd0b'] <- d0b
   dl.entries[next_pos, 'data_type'] <- data_type
-  dl.entries[next_pos, 'DB'] <- database
-  dl.entries[next_pos, 'DBOFFSET'] <- database_offset
+  if (d0a == 0) {
+    dl.entries[next_pos, 'DB'] <- database
+    dl.entries[next_pos, 'DBOFFSET'] <- database_offset
+  }
   dl.entries[next_pos, 'bit_position'] <- bit_position
   dl.entries[next_pos, 'd24'] <- data24
   dl.entries[next_pos, 'd26'] <- data26
   dl.entries[next_pos, 'bits'] <- bits
   dl.entries[next_pos, 'array_size'] <- array_size
+  dl.entries[next_pos, 'd7'] <- d7
 
   if (d0a == 0) {
-    d7 <- d4(datalink_offset+0x2c) # always 7
-    dl.entries[next_pos, 'd7'] <- d7
-
     # calculate the address
     dbchar <- bits2char(bits)
-    dbchar <- 'D'
     # extract address
     address <- paste('DB',database,'DB',dbchar,database_offset,sep='')
     if (dbchar == 'X') {
@@ -517,9 +470,10 @@ cat(
 
 # Create an HTML table with a single line for each variable
 #   and creates a single line for each element in an array
+sorted_tags_idx <- sort(tags.entries$name, index.return=T)$ix
 for(i in 1:(tags$entries)) {
   # get current entry
-  entry <- tags.entries[i,]
+  entry <- tags.entries[sorted_tags_idx[i],]
   arr_size <- entry$array_size
   if (is.na(arr_size)) {
     arr_size <- 1
