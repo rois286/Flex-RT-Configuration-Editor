@@ -55,7 +55,7 @@ get_name <- function(offset) {
 }
 
 # Convert a type code to a type name
-data.types <- read.csv('types.csv')
+data.types <- read.csv('types.csv', stringsAsFactors = FALSE)
 type2info <- function(type_code) {
   if (is.na(type_code)) {
     return(data.types[data.types$code==0x00,])
@@ -410,6 +410,25 @@ Create HTML page with MiniWeb Server Language (MWSL) to view the values of all v
 - [ ] support tags with data_len = 0 - they probably have more meta info
 
 ```{r}
+# load a file and replace strings with magic words $1$, $2$,...
+load_replace <- function(file_name, reps) {
+  handle <- file(file_name)
+  text <- readLines(handle)
+  close(handle)
+  
+  counter=1
+  for(magicword in reps) {
+    if (is.na(magicword)) {
+      magicword <- ''
+    }
+    magicnumber <- paste('\\$',counter,'\\$',sep='')
+    text <- gsub(magicnumber, magicword, text)
+    counter <- counter+1
+  }
+  
+  return(text)
+}
+
 # check if HTTP is enabled in the FWX
 is_weblink <- 'WEBLINK' %in% toc.entries$name
 is_startproc <- 'FUNC_STARTPROC' %in% toc.entries$name
@@ -420,53 +439,12 @@ if (is_weblink && is_startproc) {
   is_http <- 'at least one'
 }
 
-# creates a UTF-8 html file
+# read template HTML header and replaces all magic words
+html_header <- load_replace('html_header.html', c(tags$entries, tags.entries[1,'name'], is_http, is_weblink, is_startproc))
+# creates an html file
 html.handle<-file(fwx.html,'w')
 # write header of HTML page
-cat(
-  # HTML Headers
-  '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">',
-  '<html>',
-  '<head>',
-  '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">',
-  
-  # Page title (in the browser window)
-  '<title>MWSL Variables</title>',
-  '</head>',
-  '<body scroll="auto">',
-  
-  # Page header
-  paste('<h1>MiniWeb Server Language (MWSL) page, with ',tags$entries,' variables</h1>',sep=''),
-  '<p>If values are empty, check the Page Source by right clicking on the page and selecting View page Source...</p>',
-  
-  # Explanation in case HTTP is not supported in the FWX
-  '<p>If you get something like:</p>',
-  '<pre style="background-color: #c0c0c0;">',
-  '&lt;!-- *** SCRIPT ERROR *** ---',
-  paste('Unknown Variable: ',tags.entries[1,'name'],'.',sep=''),
-  '</pre>',
-  paste('<p>It means your FWX does not support HTTP variables, and you need to add the following to the Table Of Contents entries from which ',is_http,' exist:',sep=''),
-  '<ol>',
-  paste('<li><code>WEBLINK exists</code> in the file? <b>',is_weblink,'</b>',sep=''),
-  paste('<li><code>FUNC_STARTPROC</code> exists in the file? <b>',is_startproc,'</b>',sep=''),
-  '</ol>',
-  
-  # Explanation in case Variable name is incorrect
-  '<p>If on the other hand you get something like:</p>',
-  '<pre style="background-color: #c0c0c0;">',
-  '&lt;!-- *** SCRIPT ERROR *** ---',
-  'Script error detected at position 29 in line:',
-  '&lt;!--',
-  '                             ^- Parse Position',
-  'Error: Error calling function \'GetVar\' result d4810013.',
-  '</pre>',
-  '<p>It means that HTTP is supported but either this variable name does not exist, or you are trying to read an array variable (with brackets []) which is impossible to accomplish with HTTP according to Simatic HMI HTTP Protocol rules.<p>',
-  '<table border="1">',
-  
-  # Column names of table
-  '<tr><th>Address</th><th>Variable</th><th>Data type</th><th>Value</th><th>Min Value</th><th>Max Value</th><th>Acquisition cycle [ms]</th></tr>',
-  sep = '\n',file=html.handle
-)
+cat(html_header, sep = '\n',file=html.handle)
 
 # Create an HTML table with a single line for each variable
 #   and creates a single line for each element in an array
@@ -481,60 +459,30 @@ for(i in 1:(tags$entries)) {
   # print a line for every item in the array
   type <- type2info(entry$data_type)
   for (j in 1:(arr_size)) {
-    array.index <- ''
-    array.size <- ''
+    name_with_index <- entry$name
+    type_with_size <- type$name
     if (arr_size > 1) {
       array.index <- paste('[',j-1,']',sep='')
       array.size <- paste('[',arr_size,']',sep='')
-    }
-    value.min <- ''
-    value.max <- ''
-    if (!is.na(type$min)) {
-      value.min <- type$min
-    }
-    if (!is.na(type$max)) {
-      value.max <- type$max
+      
+      name_with_index <- paste(entry$name,array.index,sep='')
+      type_with_size <- paste(type$name,array.size,sep='')
     }
     # extract datalink info
     datalink <- dl.entries[dl.entries$idx == entry$idx,]
-    if (is.na(datalink$address)) {
-      address <- ''
-    } else {
-      address <- datalink$address
-    }
     # extract io acquisition time
     acq <- datalink$acq
 
     # create a table raw with MWSL command to read tag value
-    tr <- c('<tr><td>',
-      address,
-      '</td><td>',
-      paste(entry$name,array.index,sep=''),
-      '</td><td>',
-      paste(type$name,array.size,sep=''),
-      '</td><td>',
-      '<MWSL><!-- write(GetVar("',
-      paste(entry$name,array.index,sep=''),
-      '")); --></MWSL>',
-      '</td><td>',
-      value.min,
-      '</td><td>',
-      value.max,
-      '</td><td>',
-      acq,
-      '</td></tr>\n')
-    
+    tr <- load_replace('html_table.html', c(datalink$address, name_with_index, type_with_size, name_with_index, type$min, type$max, acq))
+
     # needs useBytes in order to write UTF-8 characters like ü instead of <U+00FC>
-    writeLines(tr, con=html.handle, sep='', useBytes = TRUE)
+    writeLines(tr, con=html.handle, sep='\n', useBytes = TRUE)
   }
 }
 # write footer of HTML page
-cat(
-  '</table>',
-  '</body>',
-  '</html>',
-  sep = '\n',file=html.handle
-)
+html_footer <- load_replace('html_footer.html', c())
+cat(html_footer, sep = '\n',file=html.handle)
 # close the html file
 close(html.handle)
 ```

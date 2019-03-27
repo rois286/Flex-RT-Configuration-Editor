@@ -1,0 +1,30 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>MWSL Variables</title>
+</head>
+<body scroll="auto">
+<h1>MiniWeb Server Language (MWSL) page, with $1$ variables</h1>
+<p>If values are empty, check the Page Source by right clicking on the page and selecting View page Source...</p>
+<p>If you get something like:</p>
+<pre style="background-color: #c0c0c0;">
+&lt;!-- *** SCRIPT ERROR *** ---
+Unknown Variable: $2$.
+</pre>
+<p>It means your FWX does not support HTTP variables, and you need to add the following to the Table Of Contents entries from which $3$ exist:
+<ol>
+<li><code>WEBLINK exists</code> in the file? <b>$4$</b>
+<li><code>FUNC_STARTPROC</code> exists in the file? <b>$5$</b>
+</ol>
+<p>If on the other hand you get something like:</p>
+<pre style="background-color: #c0c0c0;">
+&lt;!-- *** SCRIPT ERROR *** ---
+Script error detected at position 29 in line:
+&lt;!--
+                             ^- Parse Position
+Error: Error calling function \'GetVar\' result d4810013.
+</pre>
+<p>It means that HTTP is supported but either this variable name does not exist, or you are trying to read an array variable (with brackets []) which is impossible to accomplish with HTTP according to Simatic HMI HTTP Protocol rules.<p>
+<table border="1">
+<tr><th>Address</th><th>Variable</th><th>Data type</th><th>Value</th><th>Min Value</th><th>Max Value</th><th>Acquisition cycle [ms]</th></tr>
