@@ -11,6 +11,7 @@ library("bitops")
 Reads the main configuration file: Binary strings, images and settings.
 ```{r}
 fwx.name <- "G:/Documents and Settings/WinXP/My Documents/simatic/PDATA.fwx"
+fwx.name <- "G:/Documents and Settings/WinXP/My Documents/TP177B_AllTagsHTTP.fwx"
 fwx.html <- "G:/Documents and Settings/WinXP/My Documents/simatic/tags.html"
 fwx.size <- file.size(fwx.name)
 fwx.handle <- file(fwx.name, "rb")
@@ -256,9 +257,13 @@ for (i in 1:datalink$entries) {
   }
 
   bit_position <- d1(k <- k+1)
-  data24 <- d2(k <- k+1)  
-  data26 <- d2(k <- k+2)
-  bits <- d2(k <- k+2)
+  if (d9 != 2) {
+    data24 <- d2(k <- k+1)  
+    data26 <- d2(k <- k+2)
+    bits <- d2(k <- k+2)
+  } else {
+    bits <- d1(k <- k+1)
+  }
   array_size <- d2(k <- k+2) # array size (usually 1 for a single primitive)
   d7 <- d4(k <- k+2) # always 7
   
@@ -281,8 +286,10 @@ for (i in 1:datalink$entries) {
     dl.entries[next_pos, 'DBOFFSET'] <- database_offset
   }
   dl.entries[next_pos, 'bit_position'] <- bit_position
-  dl.entries[next_pos, 'd24'] <- data24
-  dl.entries[next_pos, 'd26'] <- data26
+  if (d9 != 2) {
+    dl.entries[next_pos, 'd24'] <- data24
+    dl.entries[next_pos, 'd26'] <- data26
+  }
   dl.entries[next_pos, 'bits'] <- bits
   dl.entries[next_pos, 'array_size'] <- array_size
   dl.entries[next_pos, 'd7'] <- d7
@@ -422,8 +429,8 @@ load_replace <- function(file_name, reps) {
     if (is.na(magicword)) {
       magicword <- ''
     }
-    magicnumber <- paste('\\$',counter,'\\$',sep='')
-    text <- gsub(magicnumber, magicword, text)
+    magicnumber <- paste('$',counter,'$',sep='')
+    text <- gsub(magicnumber, magicword, text, fixed = T)
     counter <- counter+1
   }
   
