@@ -408,6 +408,7 @@ Create HTML page with MiniWeb Server Language (MWSL) to view the values of all v
 **TODO:**
 
 - [ ] support tags with data_len = 0 - they probably have more meta info
+- [ ] split HTML file into smaller parts, because MiniWeb has a size limit
 
 ```{r}
 # load a file and replace strings with magic words $1$, $2$,...
