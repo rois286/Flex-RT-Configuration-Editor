@@ -11,7 +11,6 @@ library("bitops")
 Reads the main configuration file: Binary strings, images and settings.
 ```{r}
 fwx.name <- "G:/Documents and Settings/WinXP/My Documents/simatic/PDATA.fwx"
-fwx.name <- "G:/Documents and Settings/WinXP/My Documents/TP177B_AllTagsHTTP.fwx"
 fwx.html <- "G:/Documents and Settings/WinXP/My Documents/simatic/tags.html"
 fwx.size <- file.size(fwx.name)
 fwx.handle <- file(fwx.name, "rb")
@@ -57,23 +56,37 @@ get_name <- function(offset) {
 
 # Convert a type code to a type name
 data.types <- read.csv('types.csv', stringsAsFactors = FALSE)
-type2info <- function(type_code) {
+type2info <- function(type_code, is_datalink = FALSE) {
   if (is.na(type_code)) {
-    return(data.types[data.types$code==0x00,])
+    type <- data.types[data.types$code==0x00,]
+    return(type[!is.na(type$code),])
   }
+
+  # Data link type
+  if (is_datalink) {
+    if (type_code >= 0 && type_code <= 14) {
+      type <- data.types[data.types$datalink_code==type_code,]
+      return(type[!is.na(type$code),])
+    } else {
+      type <- data.types[data.types$code==0x00,]
+      return(type[!is.na(type$code),])
+    }
+  }
+
+  # tag entires type
   # types larger than 0x2000 are arrays
   if (type_code>=0x2000) {
     type_code <- type_code-0x2000
   }
   # extract the correct data type
-  type=data.types[data.types$code==type_code,]
+  type <- data.types[data.types$code==type_code,]
+  type <- type[!is.na(type$code),]
   if (dim(type)[1]!=0) {
     return(type)
   } else {
     # create an unknown empty type
-    type=data.types[data.types$code==0x00,]
-    type$code=type_code
-    return(type)
+    type <- data.types[data.types$code==0x00,]
+    return(type[!is.na(type$code),])
   }
 }
 ```
@@ -182,39 +195,12 @@ View(toc.entries)
 
 Convert Datalink type into a letter
 ```{r}
-# convert a DataLink DataType into a single letter
-datalink_datatypes <- c('B','B','W','W','D','D','D','X','B','W','W','W','D','B','B','?')
-get_dldt <- function(data_type) {
-  # 0=B (Char)
-  # 1=B (Byte)
-  # 2=W (Int)
-  # 3=W (Word)
-  # 4=D (DInt/Time)
-  # 5=D (DWord)
-  # 6=D (Real)
-  # 7=X (Bool)
-  # 8=B (String)
-  # 9=W (Timer)
-  # 10=W (Counter)
-  # 11=W (Date)
-  # 12=D (Time of day)
-  # 13=B (Date and time)
-  # 14=B (StringChar)
-
-  if (data_type >= 0 & data_type <= 14) {
-    return(datalink_datatypes[data_type+1])
-  } else {
-    return(datalink_datatypes[length(datalink_datatypes)])
-  }
-}
-
 # convert number of bits to a single letter
 bits2char_arr <- c('X','','','B','W','D','D')
 bits2char <- function(bits) {
   return(bits2char_arr[log2(bits)+1])
 }
 ```
-
 
 Read Datalink which says what is the polling interval of each variable from the S7 server
 ```{r}
@@ -246,7 +232,7 @@ for (i in 1:datalink$entries) {
   d0a <- d2(k <- k+2) # always 0
   d9 <- d4(k <- k+2) # always 9
   d0b <- d2(k <- k+4) # Always 0
-  # see get_dldt()
+  # see type2info()
   data_type <- d1(k <- k+2) # data_type
 
   if (d0a == 0) {
@@ -466,18 +452,25 @@ for(i in 1:(tags$entries)) {
   }
   # print a line for every item in the array
   type <- type2info(entry$data_type)
+  # extract datalink info
+  datalink <- dl.entries[dl.entries$idx == entry$idx,]
+  # if couldn't extract type code, then get it from the datalink
+  if (type$code == 0) {
+    type <- type2info(datalink$data_type, TRUE)
+    type_name <- type$datalink_name
+  } else {
+    type_name <- type$name
+  }
   for (j in 1:(arr_size)) {
     name_with_index <- entry$name
-    type_with_size <- type$name
+    type_with_size <- type_name
     if (arr_size > 1) {
       array.index <- paste('[',j-1,']',sep='')
       array.size <- paste('[',arr_size,']',sep='')
       
       name_with_index <- paste(entry$name,array.index,sep='')
-      type_with_size <- paste(type$name,array.size,sep='')
+      type_with_size <- paste(type_name,array.size,sep='')
     }
-    # extract datalink info
-    datalink <- dl.entries[dl.entries$idx == entry$idx,]
     # extract io acquisition time
     acq <- datalink$acq
 
