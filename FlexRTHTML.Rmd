@@ -1,0 +1,106 @@
+---
+title: "Create WiniWeb SL HTML page"
+output: html_notebook
+---
+
+```{r}
+# name if input FWX configuration file
+fwx.name <- "G:/Documents and Settings/WinXP/My Documents/simatic/PDATA.fwx"
+# name of output HTML page
+fwx.html <- "G:/Documents and Settings/WinXP/My Documents/simatic/tags.html"
+
+library(knitr)
+source(purl('FlexRT.rmd', output = tempfile()))
+```
+Create HTML page with MiniWeb Server Language (MWSL) to view the values of all variables
+
+**TODO:**
+
+- [ ] support tags with data_len = 0 - they probably have more meta info
+- [ ] split HTML file into smaller parts, because MiniWeb has a size limit
+
+```{r}
+# load a file and replace strings with magic words $1$, $2$,...
+load_replace <- function(file_name, reps) {
+  handle <- file(file_name)
+  text <- readLines(handle)
+  close(handle)
+  
+  counter=1
+  for(magicword in reps) {
+    if (is.na(magicword)) {
+      magicword <- ''
+    }
+    magicnumber <- paste('$',counter,'$',sep='')
+    text <- gsub(magicnumber, magicword, text, fixed = T)
+    counter <- counter+1
+  }
+  
+  return(text)
+}
+
+# check if HTTP is enabled in the FWX
+is_weblink <- 'WEBLINK' %in% toc.entries$name
+is_startproc <- 'FUNC_STARTPROC' %in% toc.entries$name
+is_http <- 'none'
+if (is_weblink && is_startproc) {
+  is_http <- 'both'
+} else if (is_weblink || is_startproc) {
+  is_http <- 'at least one'
+}
+
+# read template HTML header and replaces all magic words
+html_header <- load_replace('html_header.html', c(tags$entries, tags.entries[1,'name'], is_http, is_weblink, is_startproc))
+# creates an html file
+html.handle<-file(fwx.html,'w')
+# write header of HTML page
+cat(html_header, sep = '\n',file=html.handle)
+
+# Create an HTML table with a single line for each variable
+#   and creates a single line for each element in an array
+sorted_tags_idx <- sort(tags.entries$name, index.return=T)$ix
+for(i in 1:(tags$entries)) {
+  # get current entry
+  entry <- tags.entries[sorted_tags_idx[i],]
+  arr_size <- entry$array_size
+  if (is.na(arr_size)) {
+    arr_size <- 1
+  }
+  # print a line for every item in the array
+  type <- type2info(entry$data_type)
+  # extract datalink info
+  datalink <- dl.entries[dl.entries$idx == entry$idx,]
+  # if couldn't extract type code, then get it from the datalink
+  if (type$code == 0) {
+    type <- type2info(datalink$data_type, TRUE)
+    type_name <- type$datalink_name
+  } else {
+    type_name <- type$name
+  }
+  for (j in 1:(arr_size)) {
+    name_with_index <- entry$name
+    type_with_size <- type_name
+    if (arr_size > 1) {
+      array.index <- paste('[',j-1,']',sep='')
+      array.size <- paste('[',arr_size,']',sep='')
+      
+      name_with_index <- paste(entry$name,array.index,sep='')
+      type_with_size <- paste(type_name,array.size,sep='')
+    }
+    # extract io acquisition time
+    acq <- datalink$acq
+
+    # create a table raw with MWSL command to read tag value
+    tr <- load_replace('html_table.html', c(datalink$address, name_with_index, type_with_size, name_with_index, type$min, type$max, acq))
+
+    # needs useBytes in order to write UTF-8 characters like ü instead of <U+00FC>
+    writeLines(tr, con=html.handle, sep='\n', useBytes = TRUE)
+  }
+}
+# write footer of HTML page
+html_footer <- load_replace('html_footer.html', c())
+cat(html_footer, sep = '\n',file=html.handle)
+# close the html file
+close(html.handle)
+```
+

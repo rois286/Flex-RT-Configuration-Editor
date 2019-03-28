@@ -10,8 +10,6 @@ library("bitops")
 
 Reads the main configuration file: Binary strings, images and settings.
 ```{r}
-fwx.name <- "G:/Documents and Settings/WinXP/My Documents/simatic/PDATA.fwx"
-fwx.html <- "G:/Documents and Settings/WinXP/My Documents/simatic/tags.html"
 fwx.size <- file.size(fwx.name)
 fwx.handle <- file(fwx.name, "rb")
 fwx.data <- readBin(fwx.handle, "raw", fwx.size)
@@ -44,14 +42,17 @@ d4 <- function(pos) {
 }
 
 # convert a UTF16-LE string (type of strings in FWX file) into UTF-8
-# Only the RStudio View does not display well non-latin characters
-#   but these characters are preserved well
+get_name_len <- function(name_start, len) {
+  name_characters <- list(fwx.data[(name_start+1):(name_start+len*2)])
+  name <- iconv(name_characters, "UTF-16LE", "UTF-8")
+}
+
+# convert a UTF16-LE string (type of strings in FWX file) into UTF-8
+# extract length from the first 16 bit word
 get_name <- function(offset) {
   # name length - in 16bits UTF16 Little Endian characters
   len <- d2(offset)
-  name_start <- offset+2
-  name_characters <- list(fwx.data[(name_start+1):(name_start+len*2)])
-  name <- iconv(name_characters, "UTF-16LE", "UTF-8")
+  get_name_len(offset+2, len)
 }
 
 # Convert a type code to a type name
@@ -190,7 +191,6 @@ for(i in 1:length(toc)) {
 }
 # calculate the last item size with the global constant
 toc.entries[next_pos, 'item_size'] <- header.tables_end - last_offset
-View(toc.entries)
 ```
 
 Convert Datalink type into a letter
@@ -230,7 +230,7 @@ for (i in 1:datalink$entries) {
   acq <- d4(k <- k+2) # Acquisition cycle (in milliseconds)
   d258 <- d2(k <- k+4) # always 0x102 = 256
   d0a <- d2(k <- k+2) # always 0
-  d9 <- d4(k <- k+2) # always 9
+  d9 <- d4(k <- k+2) # always 9 (for HTTP boolean - it is 6)
   d0b <- d2(k <- k+4) # Always 0
   # see type2info()
   data_type <- d1(k <- k+2) # data_type
@@ -300,7 +300,6 @@ for (i in 1:datalink$entries) {
 }
 # calculate the last item size with the size of the parent table
 dl.entries[next_pos, 'item_size'] <- datalink$offset + datalink$item_size - last_offset
-View(dl.entries)
 ```
 
 Read the Tags, this is the list of all variables connected to the server monitoring the system.
@@ -392,98 +391,4 @@ for(i in 1:tags$entries) {
 }
 # calculate the last item size with the size of the parent table
 tags.entries[next_pos, 'item_size'] <- tags$offset + tags$item_size - last_offset
-# View the tags
-View(tags.entries)
-```
-
-Create HTML page with MiniWeb Server Language (MWSL) to view the values of all variables
-
-**TODO:**
-
-- [ ] support tags with data_len = 0 - they probably have more meta info
-- [ ] split HTML file into smaller parts, because MiniWeb has a size limit
-
-```{r}
-# load a file and replace strings with magic words $1$, $2$,...
-load_replace <- function(file_name, reps) {
-  handle <- file(file_name)
-  text <- readLines(handle)
-  close(handle)
-  
-  counter=1
-  for(magicword in reps) {
-    if (is.na(magicword)) {
-      magicword <- ''
-    }
-    magicnumber <- paste('$',counter,'$',sep='')
-    text <- gsub(magicnumber, magicword, text, fixed = T)
-    counter <- counter+1
-  }
-  
-  return(text)
-}
-
-# check if HTTP is enabled in the FWX
-is_weblink <- 'WEBLINK' %in% toc.entries$name
-is_startproc <- 'FUNC_STARTPROC' %in% toc.entries$name
-is_http <- 'none'
-if (is_weblink && is_startproc) {
-  is_http <- 'both'
-} else if (is_weblink || is_startproc) {
-  is_http <- 'at least one'
-}
-
-# read template HTML header and replaces all magic words
-html_header <- load_replace('html_header.html', c(tags$entries, tags.entries[1,'name'], is_http, is_weblink, is_startproc))
-# creates an html file
-html.handle<-file(fwx.html,'w')
-# write header of HTML page
-cat(html_header, sep = '\n',file=html.handle)
-
-# Create an HTML table with a single line for each variable
-#   and creates a single line for each element in an array
-sorted_tags_idx <- sort(tags.entries$name, index.return=T)$ix
-for(i in 1:(tags$entries)) {
-  # get current entry
-  entry <- tags.entries[sorted_tags_idx[i],]
-  arr_size <- entry$array_size
-  if (is.na(arr_size)) {
-    arr_size <- 1
-  }
-  # print a line for every item in the array
-  type <- type2info(entry$data_type)
-  # extract datalink info
-  datalink <- dl.entries[dl.entries$idx == entry$idx,]
-  # if couldn't extract type code, then get it from the datalink
-  if (type$code == 0) {
-    type <- type2info(datalink$data_type, TRUE)
-    type_name <- type$datalink_name
-  } else {
-    type_name <- type$name
-  }
-  for (j in 1:(arr_size)) {
-    name_with_index <- entry$name
-    type_with_size <- type_name
-    if (arr_size > 1) {
-      array.index <- paste('[',j-1,']',sep='')
-      array.size <- paste('[',arr_size,']',sep='')
-      
-      name_with_index <- paste(entry$name,array.index,sep='')
-      type_with_size <- paste(type_name,array.size,sep='')
-    }
-    # extract io acquisition time
-    acq <- datalink$acq
-
-    # create a table raw with MWSL command to read tag value
-    tr <- load_replace('html_table.html', c(datalink$address, name_with_index, type_with_size, name_with_index, type$min, type$max, acq))
-
-    # needs useBytes in order to write UTF-8 characters like ü instead of <U+00FC>
-    writeLines(tr, con=html.handle, sep='\n', useBytes = TRUE)
-  }
-}
-# write footer of HTML page
-html_footer <- load_replace('html_footer.html', c())
-cat(html_footer, sep = '\n',file=html.handle)
-# close the html file
-close(html.handle)
 ```

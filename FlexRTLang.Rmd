@@ -1,13 +1,134 @@
 ---
-title: "R Notebook"
+title: "Extract languages from FWX configuration file"
 output: html_notebook
 ---
 
-The FWX file will be export to Microsoft Excel. Which can be edited easily. Then exported back to FWX.
+TODO
+
+- [ ] Add an option to import back the Excel file into the FWX
+
+```{r}
+# name if input FWX configuration file
+fwx.name <- "G:/Documents and Settings/WinXP/My Documents/simatic/PDATA.fwx"
+# name of output HTML page
+fwx.xlsx <- "G:/Documents and Settings/WinXP/My Documents/simatic/PDATA.xlsx"
+
+library(knitr)
+source(purl('FlexRT.rmd', output = tempfile()))
+```
+
+The FWX file will be exported to Microsoft Excel. Which can be edited easily. Then exported back to FWX.
 ```{r}
 if (! "xlsx" %in% rownames(installed.packages())) {
   # install package to manipulate Excel files
   install.packages("xlsx")
 }
 library('xlsx')
+```
+
+Read all languages from StringStore
+```{r}
+store_index <- toc.entries$name == 'STRINGSTORE'
+store <- toc.entries[store_index,]
+# location of metainfo for all strings
+store.start <- store$offset + 0x40
+# size of store
+store.size <- d4(store.start)
+# size of Table of contents (all the offsets of strings)
+store.toc_size <- d4(store.start+0xc)
+# begining of actual strings
+store.strings_start <- store.start + d4(store.start+0x14)
+# How many strings exist in each dictionary
+store.strings_count <- d4(store.start+0x18)
+# Begining of the TOC (offsets)
+store.toc_start <- store.start + 0x1c
+# location of header of languages
+store.lang_header_pos = store.start+store.toc_size;
+# how many languages exist
+store.languages = d2(store.lang_header_pos);
+# language codes
+store.language_codes = c()
+# get codes of languages
+for (i in 1:store.languages) {
+  store.language_codes[i] <- d2(store.lang_header_pos + i*2)
+}
+# create empty data frame to hold all languages
+langs.entries <- data.frame()
+
+# get a string absolute offset according of offset in the TOC
+get_str_offset <- function(offset_pos) {
+  # get offset of the string
+  string_offset <- d4(offset_pos)
+  # somekind of a flag for the string
+  flag <- bitShiftR(string_offset, 31)
+  # remove the flag from the string offset
+  string_offset <-  bitAnd(string_offset,0x7fffffff);
+  # calculate the absolute offset of the string from beginning of file
+  total_offset <- store.strings_start + string_offset;
+}
+
+# iterate thru all the langs and get their strings
+for(i in 1:store.languages) {
+  lcid <- store.language_codes[i] # Get Locale Code ID
+  # extract all the strings for current language
+  for (j in 1:store.strings_count) {
+    # get location of offset of the string
+    offset_pos <- store.toc_start + (j-1+store.strings_count*(i-1))*4;
+    # check if this string already exists (a duplicate string)
+    repeated_idx <- if(j>1) langs.entries[, 'offset']==d4(offset_pos) else 0
+    if (sum(repeated_idx, na.rm = T) > 0) {
+      strs <- langs.entries[repeated_idx,]
+      # get the first string
+      str <- strs[1,'str']
+    } else {
+      # get current string absolute offset
+      total_offset <- get_str_offset(offset_pos)
+      # calculate length of string
+      string_length <- -1
+      if (j < store.strings_count || i < store.languages) {
+        # get the next string offset
+        next_total_offset <- get_str_offset(offset_pos+4)
+        # subtract next string from current
+        string_length <- next_total_offset - total_offset
+      }
+      # reference to a previous string (probably a duplicate) or reached last string in string store
+      if (string_length <= 0) {
+        string_length <- 0
+        # look for a null character
+        while (d2(total_offset + string_length) != 0) {
+          string_length <- string_length+2
+        }
+        # add the null character
+        string_length+2
+      }
+      # each character is 2 bytes long
+      string_length <- string_length / 2
+      # read the string (without the null at the end)
+      str <- get_name_len(total_offset, string_length-1)
+    }
+    # store the string in it own language column
+    row <- nrow(langs.entries)+1
+    langs.entries[row, 'idx'] <- j
+    langs.entries[row, 'lcid'] <- lcid
+    langs.entries[row, 'str'] <- str
+    langs.entries[row, 'offset'] <- bitAnd(d4(offset_pos),0x7fffffff)
+  }
+}
+```
+
+
+Convert all the entries into an Excel file
+```{r}
+# separate each language to its own columns
+  langs <- unique(langs.entries[,'lcid'])
+
+  for(i in 1:length(langs)) {
+    lcid <- langs[i]
+    # get current language Locale Code in HexaDecimal
+    current_lang <- paste('0x',as.hexmode(lcid),sep='')
+    # get all strings in this lang
+    strs <- langs.entries[langs.entries$lcid==lcid,c('idx','str')]
+    # create the Excel file if doesn't exist, and append all languages
+    write.xlsx(strs, file = fwx.xlsx, row.names=FALSE, sheetName = current_lang, append = i>1)
+  }
 ```
