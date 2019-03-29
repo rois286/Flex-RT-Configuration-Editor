@@ -22,7 +22,7 @@ There is already an app, which can export all tags to Excel file, called FlexRT 
 1. Change `fwx.name` to be the name (including path) of the fwx configuration file to parse
 1. Change `fwx.xlsx` to be the name (including path) of the Excel file to create with all dictionary values inside the `fwx.name` FWX file
 1. Run this script (Ctrl+Alt+R)
-1. Open the `fwx.xlsx` with Excel
+1. Open the `fwx.xlsx` with Excel, each language code will have its own sheet (0x409 - English, 0x407 - German, 0x40d - Hebrew)
 
 **Background**
 
