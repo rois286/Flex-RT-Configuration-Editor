@@ -24,6 +24,16 @@ There is already an app, which can export all tags to Excel file, called FlexRT 
 1. Run this script (Ctrl+Alt+R)
 1. Open the `fwx.xlsx` with Excel, each language code will have its own sheet (0x409 - English, 0x407 - German, 0x40d - Hebrew)
 
+**Usage for exploding FWX**
+
+1. Download the freeware [R-Studio](https://www.rstudio.com) for easy activation of this script
+1. Open the `FlexRTExplode.R` R *script* file
+1. Change `fwx.name` to be the name (including path) of the fwx configuration file to parse
+1. Change `fwx.dir` to be the path to extract all TOC entries to. Each entry will become its own directory, and inside it will be all the elements belonging to that TOC.
+1. Run this script (Ctrl+Alt+R)
+1. You may traverse the directory `fwx.dir` and all its sub-directories.
+1. Future work will parse the TOC data better, and will allow imploding back the `fwx.dir` back into an FWX file.
+
 **Background**
 
 At our Ben-Gurion University of the Negev (BGU) we have a *Labmaster 20G* Glove Box (GB) with Nitrogen environment. It has a Human Machine Interface (HMI) which controls the GB.
